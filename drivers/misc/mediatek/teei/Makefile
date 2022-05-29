@@ -11,6 +11,6 @@
 # GNU General Public License for more details.
 
 ifeq ($(CONFIG_MICROTRUST_TEE_SUPPORT), y)
-obj-y += V2.0/
+obj-y += lite/
 endif
 
