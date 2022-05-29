@@ -14,8 +14,8 @@
 
 #include <asm/fiq_glue.h>
 #include <linux/platform_device.h>
-#include <linux/trusty/smcall.h>
-#include <linux/trusty/trusty.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
 
 #include "trusty-fiq.h"
 

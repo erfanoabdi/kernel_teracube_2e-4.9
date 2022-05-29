@@ -29,10 +29,10 @@
 #include <linux/virtio_ids.h>
 #include <linux/virtio_config.h>
 
-#include <linux/trusty/smcall.h>
-#include <linux/trusty/trusty.h>
-#include <linux/teei/teei_ipc.h>
-#include <linux/teei/teei_shm.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
+#include <teei_ipc.h>
+#include <teei_shm.h>
 #include <imsg_log.h>
 #include "teei_bootprof.h"
 
@@ -45,7 +45,7 @@
 #define MAX_SRV_NAME_LEN		256
 #define MAX_DEV_NAME_LEN		32
 
-#define DEFAULT_MSG_BUF_SIZE		PAGE_SIZE * 16
+#define DEFAULT_MSG_BUF_SIZE		(PAGE_SIZE * 16)
 #define DEFAULT_MSG_BUF_ALIGN		PAGE_SIZE
 
 #define TIPC_CTRL_ADDR			53
@@ -219,7 +219,8 @@ err_alloc:
 
 #else
 	/* allocate buffer that can be shared with secure world */
-	mb->buf_va = _alloc_shareable_mem(sz, &mb->buf_pa, GFP_KERNEL | GFP_DMA);
+	mb->buf_va = _alloc_shareable_mem(sz, &mb->buf_pa,
+						GFP_KERNEL | GFP_DMA);
 	if (!mb->buf_va)
 		goto err_alloc;
 
@@ -266,6 +267,7 @@ static inline void mb_reset(struct tipc_msg_buf *mb)
 static void _free_chan(struct kref *kref)
 {
 	struct tipc_chan *ch = container_of(kref, struct tipc_chan, refcount);
+
 	kfree(ch);
 }
 
@@ -355,6 +357,7 @@ static struct tipc_msg_buf *vds_get_txbuf(struct tipc_virtio_dev *vds,
 
 	if ((PTR_ERR(mb) == -EAGAIN) && timeout) {
 		DEFINE_WAIT_FUNC(wait, woken_wake_function);
+
 		timeout = msecs_to_jiffies(timeout);
 		add_wait_queue(&vds->sendq, &wait);
 		for (;;) {
@@ -378,7 +381,7 @@ static struct tipc_msg_buf *vds_get_txbuf(struct tipc_virtio_dev *vds,
 	if (IS_ERR(mb))
 		return mb;
 
-	BUG_ON(!mb);
+	WARN_ON(!mb);
 
 	/* reset and reserve space for message header */
 	mb_reset(mb);
@@ -936,11 +939,14 @@ static long tipc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case TIPC_IOC_CONNECT:
 		ret = dn_connect_ioctl(dn, (char __user *)arg);
 		if (ret) {
-			pr_err("%s: TIPC_IOC_CONNECT error (%d)!\n", __func__, ret);
-			trusty_fast_call32(dn->chan->vds->vdev->dev.parent->parent,
+			pr_err("%s: TIPC_IOC_CONNECT error (%d)!\n",
+								__func__, ret);
+			trusty_fast_call32(
+					dn->chan->vds->vdev->dev.parent->parent,
 					MT_SMC_FC_THREADS, 0, 0, 0);
 
-			trusty_std_call32(dn->chan->vds->vdev->dev.parent->parent,
+			trusty_std_call32(
+					dn->chan->vds->vdev->dev.parent->parent,
 					SMC_SC_NOP, 0, 0, 0);
 		}
 		break;
@@ -1157,7 +1163,8 @@ static struct tipc_virtio_dev *_get_vds(struct tipc_cdev_node *cdn)
 	return _dn_lookup_vds(cdn);
 }
 
-static int tipc_open_channel(struct tipc_cdev_node *cdn, struct tipc_dn_chan **o_dn)
+static int tipc_open_channel(struct tipc_cdev_node *cdn,
+					struct tipc_dn_chan **o_dn)
 {
 	int ret;
 	struct tipc_virtio_dev *vds;
@@ -1242,7 +1249,8 @@ int tipc_k_disconnect(tipc_k_handle h)
 }
 EXPORT_SYMBOL(tipc_k_disconnect);
 
-ssize_t tipc_k_read(tipc_k_handle h, void *buf, size_t buf_len, unsigned int flags)
+ssize_t tipc_k_read(tipc_k_handle h, void *buf,
+				size_t buf_len, unsigned int flags)
 {
 	ssize_t ret;
 	size_t  data_len;
@@ -1490,11 +1498,6 @@ static void _handle_conn_rsp(struct tipc_virtio_dev *vds,
 		return;
 	}
 
-	dev_dbg(&vds->vdev->dev,
-		"%s: connection response: for addr 0x%x: "
-		"status %d remote addr 0x%x\n",
-		__func__, rsp->target, rsp->status, rsp->remote);
-
 	/* Lookup channel */
 	chan = vds_lookup_channel(vds, rsp->target);
 	if (chan) {
@@ -1632,7 +1635,7 @@ static int _handle_rxbuf(struct tipc_virtio_dev *vds,
 		if (chan) {
 			/* handle it */
 			rxbuf = chan->ops->handle_msg(chan->ops_arg, rxbuf);
-			BUG_ON(!rxbuf);
+			WARN_ON(!rxbuf);
 			kref_put(&chan->refcount, _free_chan);
 		}
 	}
@@ -1695,7 +1698,7 @@ static int tipc_virtio_probe(struct virtio_device *vdev)
 	struct tipc_dev_config config;
 	struct virtqueue *vqs[2];
 	vq_callback_t *vq_cbs[] = {_rxvq_cb, _txvq_cb};
-	const char *vq_names[] = { "rx", "tx" };
+	const char *vq_names[2] = { "rx", "tx" };
 
 	TEEI_BOOT_FOOTPRINT("TEEI Tipc Probe Start");
 	dev_dbg(&vdev->dev, "%s:\n", __func__);

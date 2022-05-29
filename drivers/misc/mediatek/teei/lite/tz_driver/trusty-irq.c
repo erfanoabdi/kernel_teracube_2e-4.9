@@ -19,9 +19,9 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/trusty/smcall.h>
 #include <linux/trusty/sm_err.h>
-#include <linux/trusty/trusty.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
 #ifdef CONFIG_TRUSTY_INTERRUPT_MAP
 #include <linux/irqdomain.h>
 #include <linux/of_irq.h>
@@ -151,7 +151,7 @@ static int trusty_irq_call_notify(struct notifier_block *nb,
 {
 	struct trusty_irq_state *is;
 
-	BUG_ON(!irqs_disabled());
+	WARN_ON(!irqs_disabled());
 
 	if (action != TRUSTY_CALL_PREPARE)
 		return NOTIFY_DONE;
@@ -282,7 +282,8 @@ static void trusty_irq_cpu_dead(void *info)
 	dev_dbg(is->dev, "%s: cpu %d\n", __func__, smp_processor_id());
 
 	local_irq_save(irq_flags);
-	schedule_work_on(smp_processor_id(), &(this_cpu_ptr(is->irq_work)->work));
+	schedule_work_on(smp_processor_id(),
+			&(this_cpu_ptr(is->irq_work)->work));
 	local_irq_restore(irq_flags);
 }
 

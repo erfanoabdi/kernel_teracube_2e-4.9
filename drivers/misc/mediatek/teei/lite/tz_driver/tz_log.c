@@ -21,9 +21,9 @@
 #include <asm/page.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/trusty/trusty.h>
-#include <linux/trusty/smcall.h>
+#include <teei_trusty.h>
 #include <imsg_log.h>
+#include <teei_smcall.h>
 #include "tz_log.h"
 
 static int log_read_line(struct tz_log_state *s, int put, int get)
@@ -124,7 +124,6 @@ static void tz_driver_dump_logs(struct tz_log_state *s)
 static int tz_log_call_notify(struct notifier_block *nb,
 				  unsigned long action, void *data)
 {
-#ifdef CONFIG_MICROTRUST_TZ_LOG
 	struct tz_log_state *s;
 	unsigned long flags;
 
@@ -135,7 +134,6 @@ static int tz_log_call_notify(struct notifier_block *nb,
 	spin_lock_irqsave(&s->lock, flags);
 	tz_driver_dump_logs(s);
 	spin_unlock_irqrestore(&s->lock, flags);
-#endif
 
 	return NOTIFY_OK;
 }
@@ -197,7 +195,8 @@ int tz_log_probe(struct device *dev, struct trusty_state *t_state)
 				TZ_LOG_SIZE - sizeof(struct boot_log_rb));
 
 	s->call_notifier.notifier_call = tz_log_call_notify;
-	result = atomic_notifier_chain_register(&t_state->notifier, &s->call_notifier);
+	result = atomic_notifier_chain_register(&t_state->notifier,
+							&s->call_notifier);
 	if (result < 0) {
 		IMSG_ERROR("failed to register tz driver call notifier\n");
 		goto error_call_notifier;
@@ -232,7 +231,7 @@ int tz_log_remove(struct device *dev, struct trusty_state *t_state)
 	struct tz_log_state *s = t_state->log_state;
 
 	atomic_notifier_chain_unregister(&panic_notifier_list,
-					 	&s->panic_notifier);
+						&s->panic_notifier);
 	atomic_notifier_chain_unregister(&t_state->notifier,
 						&s->call_notifier);
 

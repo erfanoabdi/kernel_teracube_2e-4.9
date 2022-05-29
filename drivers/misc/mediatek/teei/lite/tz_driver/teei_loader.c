@@ -23,19 +23,20 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/teei/teei_ipc.h>
-#include <linux/trusty/trusty.h>
-#include <linux/trusty/smcall.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
+#include <teei_ipc.h>
 #include <imsg_log.h>
+#include "teei_loader.h"
 
 #define ROUND_UP(N, S)		((((N) + (S) - 1) / (S)) * (S))
-#define MAX_SHM_LEN		(0x280000) 
+#define MAX_SHM_LEN		(0x180000)
 #define TEEI_LOADER_MAJOR	252
 
 #define TEEI_IOC_MAGIC		'T'
 #define TEEI_LOAD_TA		_IO(TEEI_IOC_MAGIC, 0x1)
 #define TEEI_SEND_MODEL_INFO	_IO(TEEI_IOC_MAGIC, 0x2)
-#define CMD_FP_GET_UUID     _IO(TEEI_IOC_MAGIC, 0x3)
+#define CMD_FP_GET_UUID		_IO(TEEI_IOC_MAGIC, 0x3)
 
 static struct cdev teei_loader_cdev;
 static int loader_major = TEEI_LOADER_MAJOR;
@@ -47,18 +48,6 @@ DEFINE_MUTEX(loader_mutex);
 struct teei_loader_head {
 	unsigned long long file_len;
 };
-
-extern struct TEEC_UUID uuid_fp;
-
-struct TEEC_UUID {
-	uint32_t timeLow;
-	uint16_t timeMid;
-	uint16_t timeHiAndVersion;
-	uint8_t clockSeqAndNode[8];
-};
-
-extern s32 trusty_mtee_std_call32(u32 smcnr, u32 a0, u32 a1, u32 a2);
-
 
 static int teei_loader_open(struct inode *inode, struct file *filp)
 {
@@ -93,11 +82,11 @@ static long load_ta_fn(unsigned long arg)
 {
 
 	struct teei_loader_head head;
-	void * shared_buff = NULL;
+	void *shared_buff = NULL;
 	unsigned long shared_buff_pa = 0;
 	long retVal = 0;
 	unsigned long shm_size = 0;
-			
+
 	if (copy_from_user((void *)&head, (void *)arg, sizeof(head))) {
 		IMSG_ERROR("Can not copy the loader head from user space!\n");
 		return -EFAULT;
@@ -106,7 +95,7 @@ static long load_ta_fn(unsigned long arg)
 	shm_size = head.file_len;
 
 	if (ROUND_UP(shm_size, PAGE_SIZE) > MAX_SHM_LEN) {
-		IMSG_ERROR("The loader file is TOO large, can NOT transfer it\n");
+		IMSG_ERROR("Loader file is TOO large, can NOT transfer it\n");
 		return -EINVAL;
 	}
 
@@ -121,19 +110,23 @@ static long load_ta_fn(unsigned long arg)
 	}
 
 
-	if (copy_from_user(shared_buff, (void *)(arg + sizeof(head)), shm_size)) {
-		IMSG_ERROR("%s: Failed to copy the file data from user space!\n", __func__);
+	if (copy_from_user(shared_buff, (void *)(arg + sizeof(head)),
+								shm_size)) {
+		IMSG_ERROR("%s: Failed to copy the file data!\n", __func__);
 		retVal = -EFAULT;
 		goto err_free_shm;
 	}
 
 	retVal = trusty_mtee_std_call32(SMC_SC_LOAD_TA, (u32)(shared_buff_pa),
-					(u32)((u64)shared_buff_pa >> 32), shm_size);
-	if (retVal != 0)
-		IMSG_ERROR("%s: Failed to send SMC Call to TEE(%ld)!\n", __func__, retVal);
+				(u32)((u64)shared_buff_pa >> 32), shm_size);
+	if (retVal != 0) {
+		IMSG_ERROR("%s: Failed to send SMC Call(%ld)!\n",
+							__func__, retVal);
+	}
 
 err_free_shm:
-	free_pages_exact((void *)shared_buff, get_order(ROUND_UP(shm_size, PAGE_SIZE)));
+	free_pages_exact((void *)shared_buff, get_order(
+					ROUND_UP(shm_size, PAGE_SIZE)));
 
 	return retVal;
 }
@@ -141,7 +134,7 @@ err_free_shm:
 static long send_model_fn(unsigned long arg)
 {
 	struct teei_loader_head head;
-	void * shared_buff = NULL;
+	void *shared_buff = NULL;
 	unsigned long shared_buff_pa = 0;
 	long retVal = 0;
 	unsigned long shm_size = 0;
@@ -154,7 +147,7 @@ static long send_model_fn(unsigned long arg)
 	shm_size = head.file_len;
 
 	if (ROUND_UP(shm_size, PAGE_SIZE) > MAX_SHM_LEN) {
-		IMSG_ERROR("The loader file is TOO large, can NOT transfer it\n");
+		IMSG_ERROR("loader file is TOO large, can NOT transfer it\n");
 		return -EINVAL;
 	}
 
@@ -167,19 +160,24 @@ static long send_model_fn(unsigned long arg)
 
 	shared_buff_pa = (unsigned long)virt_to_phys(shared_buff);
 
-	if (copy_from_user(shared_buff, (void *)(arg + sizeof(head)), shm_size)) {
-		IMSG_ERROR("%s: Failed to copy the file data from user space!\n", __func__);
+	if (copy_from_user(shared_buff, (void *)(arg + sizeof(head)),
+								shm_size)) {
+		IMSG_ERROR("%s: Failed to copy from user space!\n", __func__);
 		retVal = -EFAULT;
 		goto err_free_shm;
 	}
 
-	retVal = trusty_mtee_std_call32(SMC_SC_SEND_MODEL_INFO, (u32)(shared_buff_pa),
-					(u32)((u64)shared_buff_pa >> 32), shm_size);
+	retVal = trusty_mtee_std_call32(SMC_SC_SEND_MODEL_INFO,
+					(u32)(shared_buff_pa),
+					(u32)((u64)shared_buff_pa >> 32),
+					shm_size);
 	if (retVal != 0)
-		IMSG_ERROR("%s: Failed to send SMC Call to TEE(%ld)!\n", __func__, retVal);
+		IMSG_ERROR("%s: Failed to send SMC Call(%ld)!\n",
+							__func__, retVal);
 
 err_free_shm:
-	free_pages_exact((void *)shared_buff, get_order(ROUND_UP(shm_size, PAGE_SIZE)));
+	free_pages_exact((void *)shared_buff,
+				get_order(ROUND_UP(shm_size, PAGE_SIZE)));
 
 	return retVal;
 }
@@ -192,28 +190,22 @@ static long teei_loader_ioctl(struct file *filp, unsigned int cmd,
 	mutex_lock(&loader_mutex);
 
 	switch (cmd) {
-		case TEEI_LOAD_TA:
-		IMSG_PRINTK(">>>>>>>>>>>> load TA <<<<<<<<<<<<<<<\n");
-			retVal = load_ta_fn(arg);
-		IMSG_PRINTK(">>>>>>>>>>>> load TA End <<<<<<<<<<<<<<<\n");
-			break;
-
-	case TEEI_SEND_MODEL_INFO:
-		IMSG_PRINTK(">>>>>>>>>>>> send model info <<<<<<<<<<<<<<<\n");
-		retVal = send_model_fn(arg);
-		IMSG_PRINTK(">>>>>>>>>>>> send model info END <<<<<<<<<<<<<<<\n");
+	case TEEI_LOAD_TA:
+		retVal = load_ta_fn(arg);
 		break;
 
-        case CMD_FP_GET_UUID:
-		IMSG_PRINTK(">>>>>>>>>>>> FP Get UUID <<<<<<<<<<<<<<<\n");
-				retVal = copy_to_user((void *)arg, &uuid_fp,
-						sizeof(struct TEEC_UUID));
-		IMSG_PRINTK(">>>>>>>>>>>> FP Get UUID END <<<<<<<<<<<<<<<\n");
-			break;
+	case TEEI_SEND_MODEL_INFO:
+		retVal = send_model_fn(arg);
+		break;
 
-		default:
-			IMSG_ERROR("%s: Unsupport IOCTL command!\n", __func__);
-			retVal = -EINVAL;
+	case CMD_FP_GET_UUID:
+		retVal = copy_to_user((void *)arg, &uuid_fp,
+					sizeof(struct TEEC_UUID));
+		break;
+
+	default:
+		IMSG_ERROR("%s: Unsupport IOCTL command!\n", __func__);
+		retVal = -EINVAL;
 	}
 
 	mutex_unlock(&loader_mutex);
@@ -225,11 +217,11 @@ static long teei_loader_ioctl(struct file *filp, unsigned int cmd,
 
 static const struct file_operations teei_loader_fops = {
 	.owner =		THIS_MODULE,
-	.llseek = 		teei_loader_llseek,
-	.read = 		teei_loader_read,
+	.llseek =		teei_loader_llseek,
+	.read =			teei_loader_read,
 	.write =		teei_loader_write,
-	.unlocked_ioctl = 	teei_loader_ioctl,
-        .compat_ioctl = 	teei_loader_ioctl,
+	.unlocked_ioctl =	teei_loader_ioctl,
+	.compat_ioctl =		teei_loader_ioctl,
 	.open =			teei_loader_open,
 	.release =		teei_loader_release,
 };
@@ -255,7 +247,8 @@ static int teei_loader_init(void)
 		goto unregister_chrdev_region;
 	}
 
-	class_dev = device_create(driver_class, NULL, devno, NULL, "teei_loader");
+	class_dev = device_create(driver_class, NULL, devno,
+						NULL, "teei_loader");
 
 	if (!class_dev) {
 		retVal = -ENOMEM;
@@ -281,7 +274,6 @@ class_destroy:
 unregister_chrdev_region:
 	unregister_chrdev_region(devno, 1);
 return_fn:
-	IMSG_DEBUG("%s:%d ==================================\n", __func__, __LINE__);
 	return retVal;
 }
 

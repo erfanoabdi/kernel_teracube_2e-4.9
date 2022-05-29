@@ -21,15 +21,16 @@
 #ifdef CONFIG_MT_TRUSTY_DEBUGFS
 #include <linux/random.h>
 #endif
+#include <linux/arm-smccc.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
 #include <linux/string.h>
 #include <linux/kthread.h>
-#include <linux/trusty/smcall.h>
 #include <linux/trusty/sm_err.h>
-#include <linux/trusty/trusty.h>
-#include <linux/teei/teei_shm.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
+#include <teei_shm.h>
 #include <imsg_log.h>
 #include "tz_log.h"
 #include "teei_bootprof.h"
@@ -40,8 +41,8 @@
 #define SMC_ARG2		"x2"
 #define SMC_ARG3		"x3"
 #define SMC_ARCH_EXTENSION	""
-#define SMC_REGISTERS_TRASHED	"x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", \
-				"x12", "x13", "x14", "x15", "x16", "x17"
+#define SMC_REGISTERS_TRASHED	"x4", "x5", "x6", "x7", "x8", "x9", \
+			"x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17"
 #else
 #define SMC_ARG0		"r0"
 #define SMC_ARG1		"r1"
@@ -50,6 +51,8 @@
 #define SMC_ARCH_EXTENSION	".arch_extension sec\n"
 #define SMC_REGISTERS_TRASHED	"ip"
 #endif
+
+#define TEEI_SHM_POOL
 
 struct smc_call_entry {
 	struct device *dev;
@@ -68,11 +71,12 @@ struct ut_smc_call_work {
 static int current_cpu_id;
 DEFINE_KTHREAD_WORKER(ut_fastcall_worker);
 struct task_struct *teei_switch_task;
+
+#if !defined(CONFIG_MACH_MT6580) && !defined(CONFIG_ARCH_MT6570)
+
 static int teei_cpu_id[] = {0x0000, 0x0001, 0x0002, 0x0003, 0x0100, 0x0101,
-			    0x0102, 0x0103, 0x0200, 0x0201, 0x0202, 0x0203};
+			0x0102, 0x0103, 0x0200, 0x0201, 0x0202, 0x0203};
 
-
-#if !defined(CONFIG_ARCH_MT6580) && !defined(CONFIG_ARCH_MT6570)
 static int teei_cpu_callback(struct notifier_block *nfb,
 					unsigned long action, void *hcpu);
 static struct notifier_block teei_cpu_notifer = {
@@ -87,26 +91,11 @@ static int get_current_cpuid(void)
 
 static inline ulong smc(ulong r0, ulong r1, ulong r2, ulong r3)
 {
-	register ulong _r0 asm(SMC_ARG0) = r0;
-	register ulong _r1 asm(SMC_ARG1) = r1;
-	register ulong _r2 asm(SMC_ARG2) = r2;
-	register ulong _r3 asm(SMC_ARG3) = r3;
+	struct arm_smccc_res res;
 
-	asm volatile(
-		__asmeq("%0", SMC_ARG0)
-		__asmeq("%1", SMC_ARG1)
-		__asmeq("%2", SMC_ARG2)
-		__asmeq("%3", SMC_ARG3)
-		__asmeq("%4", SMC_ARG0)
-		__asmeq("%5", SMC_ARG1)
-		__asmeq("%6", SMC_ARG2)
-		__asmeq("%7", SMC_ARG3)
-		SMC_ARCH_EXTENSION
-		"smc	#0"	/* switch to secure world */
-		: "=r" (_r0), "=r" (_r1), "=r" (_r2), "=r" (_r3)
-		: "r" (_r0), "r" (_r1), "r" (_r2), "r" (_r3)
-		: SMC_REGISTERS_TRASHED);
-	return _r0;
+	arm_smccc_smc(r0, r1, r2, r3, 0, 0, 0, 0, &res);
+
+	return res.a0;
 }
 
 
@@ -152,24 +141,21 @@ static ulong fast_smc(ulong smcnr, ulong r0, ulong r1, ulong r2)
 
 	entry.dev = NULL;
 	entry.smcnr = smcnr;
-	entry.param0 = r0;	
+	entry.param0 = r0;
 	entry.param1 = r1;
 	entry.param2 = r2;
 	entry.retVal = 0;
 
 	handle_fast_smc(&entry);
 
-
-	return entry.retVal;	
-	
+	return entry.retVal;
 }
-
 
 #ifdef CONFIG_TRUSTY_WDT_FIQ_ARMV7_SUPPORT
 s32 trusty_fast_call32_nodev(u32 smcnr, u32 a0, u32 a1, u32 a2)
 {
-	BUG_ON(!SMC_IS_FASTCALL(smcnr));
-	BUG_ON(SMC_IS_SMC64(smcnr));
+	WARN_ON(!SMC_IS_FASTCALL(smcnr));
+	WARN_ON(SMC_IS_SMC64(smcnr));
 
 	return fast_smc(smcnr, a0, a1, a2);
 }
@@ -179,9 +165,9 @@ s32 trusty_fast_call32(struct device *dev, u32 smcnr, u32 a0, u32 a1, u32 a2)
 {
 	struct trusty_state *s = platform_get_drvdata(to_platform_device(dev));
 
-	BUG_ON(!s);
-	BUG_ON(!SMC_IS_FASTCALL(smcnr));
-	BUG_ON(SMC_IS_SMC64(smcnr));
+	WARN_ON(!s);
+	WARN_ON(!SMC_IS_FASTCALL(smcnr));
+	WARN_ON(SMC_IS_SMC64(smcnr));
 
 	return fast_smc(smcnr, a0, a1, a2);
 }
@@ -192,9 +178,9 @@ s64 trusty_fast_call64(struct device *dev, u64 smcnr, u64 a0, u64 a1, u64 a2)
 {
 	struct trusty_state *s = platform_get_drvdata(to_platform_device(dev));
 
-	BUG_ON(!s);
-	BUG_ON(!SMC_IS_FASTCALL(smcnr));
-	BUG_ON(!SMC_IS_SMC64(smcnr));
+	WARN_ON(!s);
+	WARN_ON(!SMC_IS_FASTCALL(smcnr));
+	WARN_ON(!SMC_IS_SMC64(smcnr));
 
 	return fast_smc(smcnr, a0, a1, a2);
 }
@@ -203,7 +189,7 @@ s64 trusty_fast_call64(struct device *dev, u64 smcnr, u64 a0, u64 a1, u64 a2)
 static ulong __trusty_std_call_inner(struct device *dev, ulong smcnr,
 				   ulong a0, ulong a1, ulong a2)
 {
-	ulong ret;
+	ulong ret = 0;
 	int retry = 5;
 
 	dev_dbg(dev, "%s(0x%lx 0x%lx 0x%lx 0x%lx)\n",
@@ -233,7 +219,8 @@ static void std_smc_fn(struct kthread_work *work)
 	switch_work = container_of(work, struct ut_smc_call_work, work);
 	entry = (struct smc_call_entry *)switch_work->data;
 
-	retVal = __trusty_std_call_inner(entry->dev, entry->smcnr, entry->param0, entry->param1, entry->param2);
+	retVal = __trusty_std_call_inner(entry->dev, entry->smcnr,
+				entry->param0, entry->param1, entry->param2);
 
 	entry->retVal = retVal;
 }
@@ -267,7 +254,7 @@ static ulong trusty_std_call_inner(struct device *dev, ulong smcnr,
 
 	entry.dev = dev;
 	entry.smcnr = smcnr;
-	entry.param0 = a0;	
+	entry.param0 = a0;
 	entry.param1 = a1;
 	entry.param2 = a2;
 	entry.retVal = 0;
@@ -339,8 +326,8 @@ s32 trusty_std_call32(struct device *dev, u32 smcnr, u32 a0, u32 a1, u32 a2)
 	int ret;
 	struct trusty_state *s = platform_get_drvdata(to_platform_device(dev));
 
-	BUG_ON(SMC_IS_FASTCALL(smcnr));
-	BUG_ON(SMC_IS_SMC64(smcnr));
+	WARN_ON(SMC_IS_FASTCALL(smcnr));
+	WARN_ON(SMC_IS_SMC64(smcnr));
 
 	if (smcnr != SMC_SC_NOP) {
 		mutex_lock(&s->smc_lock);
@@ -377,16 +364,20 @@ void trusty_send_start_time(struct device *dev)
 	u64 V = 0;
 	u32 H = 0, L = 0;
 	struct timeval tv;
-	
-	do_gettimeofday( &tv );
+
+	do_gettimeofday(&tv);
 	V = tv.tv_sec * 1000000ULL + tv.tv_usec;
 	L = (u32)(V);
 	H = (u32)(V >> 32);
-	
+
 	IMSG_DEBUG("start time = %llu\n", V);
 	IMSG_DEBUG("H = %u L = %u\n", H, L);
 	trusty_fast_call32(dev, SMC_FC_START_TIME, L, H, 0);
 }
+
+
+
+#if !defined(CONFIG_MACH_MT6580) && !defined(CONFIG_ARCH_MT6570)
 
 #define TZ_PREFER_BIND_CORE (4)
 static bool is_prefer_core(int cpu)
@@ -462,7 +453,8 @@ static ulong __handle_switch_core(unsigned long cpu)
 	switch_to_cpu_id = find_prefer_core(cpu);
 	set_cpus_allowed_ptr(teei_switch_task, cpumask_of(switch_to_cpu_id));
 
-	retVal = smc(SMC_SWITCH_CORE, teei_cpu_id[switch_to_cpu_id], teei_cpu_id[cpu], 0);
+	retVal = smc(SMC_SWITCH_CORE, teei_cpu_id[switch_to_cpu_id],
+							teei_cpu_id[cpu], 0);
 
 	current_cpu_id = switch_to_cpu_id;
 
@@ -505,7 +497,7 @@ static void handle_switch_core(unsigned long cpu)
 }
 
 static int teei_cpu_callback(struct notifier_block *self,
-                unsigned long action, void *hcpu)
+				unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned long)hcpu;
 	unsigned int sched_cpu = get_current_cpuid();
@@ -530,7 +522,7 @@ static int teei_cpu_callback(struct notifier_block *self,
 	}
 	return NOTIFY_OK;
 }
-
+#endif
 
 
 int trusty_call_notifier_register(struct device *dev, struct notifier_block *n)
@@ -564,11 +556,11 @@ ssize_t trusty_version_show(struct device *dev, struct device_attribute *attr,
 	return scnprintf(buf, PAGE_SIZE, "%s\n", s->version_str);
 }
 
-DEVICE_ATTR(trusty_version, S_IRUSR, trusty_version_show, NULL);
+DEVICE_ATTR(trusty_version, 0400, trusty_version_show, NULL);
 
 #ifdef CONFIG_MT_TRUSTY_DEBUGFS
 ssize_t trusty_add(struct device *dev, struct device_attribute *attr,
-			    char *buf)
+				char *buf)
 {
 	s32 a, b, ret;
 
@@ -581,7 +573,7 @@ ssize_t trusty_add(struct device *dev, struct device_attribute *attr,
 		(a + b) == ret ? "PASS" : "FAIL");
 }
 
-DEVICE_ATTR(trusty_add, S_IRUSR, trusty_add, NULL);
+DEVICE_ATTR(trusty_add, 0400, trusty_add, NULL);
 
 ssize_t trusty_threads(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -593,7 +585,7 @@ ssize_t trusty_threads(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_threads, S_IRUSR, trusty_threads, NULL);
+DEVICE_ATTR(trusty_threads, 0400, trusty_threads, NULL);
 
 ssize_t trusty_threadstats(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -605,7 +597,7 @@ ssize_t trusty_threadstats(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_threadstats, S_IRUSR, trusty_threadstats, NULL);
+DEVICE_ATTR(trusty_threadstats, 0400, trusty_threadstats, NULL);
 
 ssize_t trusty_threadload(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -617,7 +609,7 @@ ssize_t trusty_threadload(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_threadload, S_IRUSR, trusty_threadload, NULL);
+DEVICE_ATTR(trusty_threadload, 0400, trusty_threadload, NULL);
 
 ssize_t trusty_heap_dump(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -629,7 +621,7 @@ ssize_t trusty_heap_dump(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_heap_dump, S_IRUSR, trusty_heap_dump, NULL);
+DEVICE_ATTR(trusty_heap_dump, 0400, trusty_heap_dump, NULL);
 
 ssize_t trusty_apps(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -641,7 +633,7 @@ ssize_t trusty_apps(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_apps, S_IRUSR, trusty_apps, NULL);
+DEVICE_ATTR(trusty_apps, 0400, trusty_apps, NULL);
 
 ssize_t trusty_vdev_reset(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -650,7 +642,7 @@ ssize_t trusty_vdev_reset(struct device *dev,
 	return 0;
 }
 
-DEVICE_ATTR(trusty_vdev_reset, S_IRUSR, trusty_vdev_reset, NULL);
+DEVICE_ATTR(trusty_vdev_reset, 0400, trusty_vdev_reset, NULL);
 
 
 static void trusty_create_debugfs(struct trusty_state *s, struct device *pdev)
@@ -795,13 +787,17 @@ static int trusty_probe(struct platform_device *pdev)
 
 	for_each_online_cpu(i) {
 		current_cpu_id = i;
-		IMSG_DEBUG("init stage : current_cpu_id = %d\n", current_cpu_id);
+		IMSG_DEBUG("init stage : current_cpu_id = %d\n",
+							current_cpu_id);
+#if defined(CONFIG_MACH_MT6580) || defined(CONFIG_ARCH_MT6570)
+		break;
+#endif
 	}
 
 	TEEI_BOOT_FOOTPRINT("TEEI Create The Switch Thread");
 
 	teei_switch_task = kthread_create(kthread_worker_fn,
-					&ut_fastcall_worker, "teei_switch_thread");
+				&ut_fastcall_worker, "teei_switch_thread");
 	if (IS_ERR(teei_switch_task)) {
 		IMSG_ERROR("Failed to create switch thread !\n");
 		return -EINVAL;
@@ -813,7 +809,7 @@ static int trusty_probe(struct platform_device *pdev)
 	cpumask_set_cpu(get_current_cpuid(), &mask);
 	set_cpus_allowed_ptr(teei_switch_task, &mask);
 
-#if defined(CONFIG_ARCH_MT6580) || defined(CONFIG_ARCH_MT6570)
+#if defined(CONFIG_MACH_MT6580) || defined(CONFIG_ARCH_MT6570)
 	/* Core migration not supported */
 #else
 	TEEI_BOOT_FOOTPRINT("TEEI Register The CPU Notifier");
@@ -837,15 +833,15 @@ static int trusty_probe(struct platform_device *pdev)
 
 	TEEI_BOOT_FOOTPRINT("TEEI Start The Buffer LOG");
 	ret = tz_log_probe(&pdev->dev, s);
-	if (ret != 0) {
+	if (ret != 0)
 		goto err_log_init;
-	}
 
 	while (1) {
-		tee_status = trusty_std_call32(&pdev->dev, SMC_GET_TEE_STATUS, 0, 0, 0);
-		if (tee_status != TEE_OK) {
+		tee_status = trusty_std_call32(&pdev->dev,
+						SMC_GET_TEE_STATUS, 0, 0, 0);
+		if (tee_status != TEE_OK)
 			trusty_std_call32(&pdev->dev, SMC_NT_SCHED_T, 0, 0, 0);
-		} else
+		else
 			break;
 	}
 
@@ -924,8 +920,12 @@ static int __init trusty_driver_init(void)
 {
 	int retVal = 0;
 
+	TEEI_BOOT_FOOTPRINT("TEEI Trusty Driver Init");
+
+#ifdef TEEI_SHM_POOL
 	TEEI_BOOT_FOOTPRINT("TEEI Init The Shared Memory Pool");
 	teei_shm_init();
+#endif
 
 	retVal = platform_driver_register(&trusty_driver);
 
@@ -934,9 +934,11 @@ static int __init trusty_driver_init(void)
 
 static void __exit trusty_driver_exit(void)
 {
+#ifdef TEEI_SHM_POOL
 	TEEI_BOOT_FOOTPRINT("TEEI Release The Shared Memory Pool");
 	teei_shm_release();
-	
+#endif
+
 	platform_driver_unregister(&trusty_driver);
 }
 

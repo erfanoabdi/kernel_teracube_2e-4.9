@@ -23,8 +23,7 @@
 #include <linux/remoteproc.h>
 
 #include <linux/platform_device.h>
-#include <linux/trusty/smcall.h>
-#include <linux/trusty/trusty.h>
+#include <teei_trusty.h>
 
 #include <linux/virtio.h>
 #include <linux/virtio_config.h>
@@ -32,6 +31,8 @@
 #include <linux/virtio_ring.h>
 
 #include <linux/atomic.h>
+#include <teei_smcall.h>
+
 #include "teei_bootprof.h"
 
 #define  RSC_DESCR_VER  1
@@ -130,6 +131,7 @@ static void kick_vqs(struct work_struct *work)
 	list_for_each_entry(tvdev, &tctx->vdev_list, node) {
 		for (i = 0; i < tvdev->vring_num; i++) {
 			struct trusty_vring *tvr = &tvdev->vrings[i];
+
 			if (atomic_xchg(&tvr->needs_kick, 0))
 				kick_vq(tctx, tvdev, tvr);
 		}
@@ -216,6 +218,7 @@ static void trusty_virtio_reset(struct virtio_device *vdev)
 static u64 trusty_virtio_get_features(struct virtio_device *vdev)
 {
 	struct trusty_vdev *tvdev = vdev_to_tvdev(vdev);
+
 	return tvdev->vdev_descr->dfeatures;
 }
 
@@ -223,14 +226,14 @@ static int trusty_virtio_finalize_features(struct virtio_device *vdev)
 {
 	struct trusty_vdev *tvdev = vdev_to_tvdev(vdev);
 	/* Make sure we don't have any features > 32 bits! */
-	BUG_ON((u32)vdev->features != vdev->features);
+	WARN_ON((u32)vdev->features != vdev->features);
 	tvdev->vdev_descr->gfeatures = vdev->features;
 	return 0;
 }
 
 static void trusty_virtio_get_config(struct virtio_device *vdev,
-				     unsigned offset, void *buf,
-				     unsigned len)
+				     unsigned int offset, void *buf,
+				     unsigned int len)
 {
 	struct trusty_vdev *tvdev = vdev_to_tvdev(vdev);
 
@@ -244,8 +247,8 @@ static void trusty_virtio_get_config(struct virtio_device *vdev,
 }
 
 static void trusty_virtio_set_config(struct virtio_device *vdev,
-				     unsigned offset, const void *buf,
-				     unsigned len)
+				     unsigned int offset, const void *buf,
+				     unsigned int len)
 {
 	dev_dbg(&vdev->dev, "%s\n", __func__);
 }
@@ -253,12 +256,14 @@ static void trusty_virtio_set_config(struct virtio_device *vdev,
 static u8 trusty_virtio_get_status(struct virtio_device *vdev)
 {
 	struct trusty_vdev *tvdev = vdev_to_tvdev(vdev);
+
 	return tvdev->vdev_descr->status;
 }
 
 static void trusty_virtio_set_status(struct virtio_device *vdev, u8 status)
 {
 	struct trusty_vdev *tvdev = vdev_to_tvdev(vdev);
+
 	tvdev->vdev_descr->status = status;
 }
 
@@ -290,7 +295,7 @@ static void trusty_virtio_del_vqs(struct virtio_device *vdev)
 
 
 static struct virtqueue *_find_vq(struct virtio_device *vdev,
-				  unsigned id,
+				  unsigned int id,
 				  void (*callback)(struct virtqueue *vq),
 				  const char *name)
 {
@@ -309,7 +314,8 @@ static struct virtqueue *_find_vq(struct virtio_device *vdev,
 	tvr->size = PAGE_ALIGN(vring_size(tvr->elem_num, tvr->align));
 
 	/* allocate memory for the vring. */
-	tvr->vaddr = alloc_pages_exact(tvr->size, GFP_KERNEL | __GFP_ZERO | GFP_DMA);
+	tvr->vaddr = alloc_pages_exact(tvr->size,
+					GFP_KERNEL | __GFP_ZERO | GFP_DMA);
 	if (!tvr->vaddr) {
 		dev_err(&vdev->dev, "vring alloc failed\n");
 		return ERR_PTR(-ENOMEM);
@@ -340,7 +346,7 @@ err_new_virtqueue:
 	return ERR_PTR(-ENOMEM);
 }
 
-static int trusty_virtio_find_vqs(struct virtio_device *vdev, unsigned nvqs,
+static int trusty_virtio_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
 				  struct virtqueue *vqs[],
 				  vq_callback_t *callbacks[],
 				  const char * const names[])
@@ -411,6 +417,7 @@ static int trusty_virtio_add_device(struct trusty_ctx *tctx,
 
 	for (i = 0; i < tvdev->vring_num; i++, vr_descr++) {
 		struct trusty_vring *tvr = &tvdev->vrings[i];
+
 		tvr->tvdev    = tvdev;
 		tvr->vr_descr = vr_descr;
 		tvr->align    = vr_descr->align;
@@ -546,7 +553,8 @@ static int trusty_virtio_add_devices(struct trusty_ctx *tctx)
 
 	/* allocate buffer to load device descriptor into */
 	descr_buf_sz = PAGE_SIZE;
-	descr_va = alloc_pages_exact(descr_buf_sz, GFP_KERNEL | __GFP_ZERO | GFP_DMA);
+	descr_va = alloc_pages_exact(descr_buf_sz,
+					GFP_KERNEL | __GFP_ZERO | GFP_DMA);
 	if (!descr_va) {
 		dev_err(tctx->dev, "Failed to allocate shared area\n");
 		return -ENOMEM;

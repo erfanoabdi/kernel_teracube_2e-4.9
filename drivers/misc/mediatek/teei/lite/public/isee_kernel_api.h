@@ -13,6 +13,7 @@
  */
 
 #ifndef _ISEE_KERNEL_API_H_
+#define _ISEE_KERNEL_API_H_
 
 #include <tee_client_api.h>
 

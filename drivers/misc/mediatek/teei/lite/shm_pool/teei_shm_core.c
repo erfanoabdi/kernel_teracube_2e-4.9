@@ -21,11 +21,11 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
-#include <linux/teei/teei_shm.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_reserved_mem.h>
+#include <teei_shm.h>
 #include <imsg_log.h>
 #include "teei_bootprof.h"
 
@@ -43,15 +43,15 @@ static struct teei_shm_pool *teei_create_shm_pool(int shared_mem_size)
 	struct teei_shm_pool_mem_info shared_info;
 
 	vaddr = (unsigned long)__get_free_pages(GFP_KERNEL | GFP_DMA,
-					get_order(ROUND_UP(shared_mem_size, PAGE_SIZE)));
+			get_order(ROUND_UP(shared_mem_size, PAGE_SIZE)));
 	if (vaddr == 0) {
 
-		IMSG_ERROR("[%s][%d] Can NOT alloc the TEEI shared memory POOL!\n",
+		IMSG_ERROR("[%s][%d] Can NOT alloc the shared memory POOL!\n",
 						__func__, __LINE__);
 		return ERR_PTR(-ENOMEM);
 	}
 
-	IMSG_DEBUG("The virt address of shared memory pool is %lx \n", vaddr);
+	IMSG_DEBUG("The virt address of shared memory pool is %lx.\n", vaddr);
 
 
 	paddr = virt_to_phys((void *)vaddr);
@@ -65,9 +65,10 @@ static struct teei_shm_pool *teei_create_shm_pool(int shared_mem_size)
 
 	pool = teei_shm_pool_alloc_res_mem(&shared_info);
 	if (IS_ERR(pool)) {
-		IMSG_ERROR("Failed to call the teei_shm_pool_alloc_res_mem \n");
-		free_pages(vaddr, get_order(ROUND_UP(shared_mem_size, PAGE_SIZE)));
-	}	
+		IMSG_ERROR("Failed to call the teei_shm_pool_alloc_res_mem.\n");
+		free_pages(vaddr, get_order(ROUND_UP(
+					shared_mem_size, PAGE_SIZE)));
+	}
 
 	return pool;
 }

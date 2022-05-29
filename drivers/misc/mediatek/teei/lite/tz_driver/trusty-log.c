@@ -12,14 +12,14 @@
  *
  */
 #include <linux/platform_device.h>
-#include <linux/trusty/smcall.h>
-#include <linux/trusty/trusty.h>
 #include <linux/notifier.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/log2.h>
+#include <teei_trusty.h>
 #include <asm/page.h>
+#include <teei_smcall.h>
 #include "trusty-log.h"
 
 #define TRUSTY_LOG_SIZE (PAGE_SIZE * 32)
@@ -66,7 +66,7 @@ static void trusty_dump_logs(struct trusty_log_state *s)
 	uint32_t get, put, alloc;
 	int read_chars;
 
-	BUG_ON(!is_power_of_2(log->sz));
+	WARN_ON(!is_power_of_2(log->sz));
 
 	/*
 	 * For this ring buffer, at any given point, alloc >= put >= get.
@@ -77,7 +77,9 @@ static void trusty_dump_logs(struct trusty_log_state *s)
 	 */
 	get = s->get;
 	while ((put = log->put) != get) {
-		/* Make sure that the read of put occurs before the read of log data */
+		/* Make sure that the read of put occurs
+		 * before the read of log data
+		 */
 		rmb();
 
 		/* Read a line from the log */
@@ -149,13 +151,12 @@ static bool trusty_supports_logging(struct device *device)
 		return false;
 	}
 
-	if (result == TRUSTY_LOG_API_VERSION) {
+	if (result == TRUSTY_LOG_API_VERSION)
 		return true;
-	} else {
-		pr_info("trusty-log unsupported api version: %d, supported: %d\n",
+
+	pr_info("trusty-log unsupported api version: %d, supported: %d\n",
 			result, TRUSTY_LOG_API_VERSION);
-		return false;
-	}
+	return false;
 }
 
 static int trusty_log_probe(struct platform_device *pdev)
@@ -165,9 +166,8 @@ static int trusty_log_probe(struct platform_device *pdev)
 	phys_addr_t pa;
 
 	dev_dbg(&pdev->dev, "%s\n", __func__);
-	if (!trusty_supports_logging(pdev->dev.parent)) {
+	if (!trusty_supports_logging(pdev->dev.parent))
 		return -ENXIO;
-	}
 
 	s = kzalloc(sizeof(*s), GFP_KERNEL);
 	if (!s) {

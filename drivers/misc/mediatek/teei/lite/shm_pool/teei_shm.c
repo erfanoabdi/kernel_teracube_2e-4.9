@@ -19,7 +19,7 @@
 #include <linux/idr.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
-#include <linux/teei/teei_shm.h>
+#include <teei_shm.h>
 
 extern struct teei_shm_pool *kern_shm_pool;
 
@@ -41,9 +41,8 @@ struct teei_shm *teei_shm_kmalloc(size_t size, u32 flags)
 	}
 
 	shm = kzalloc(sizeof(*shm), GFP_KERNEL);
-	if (!shm) {
+	if (!shm)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	shm->flags = flags;
 	poolm = &kern_shm_pool->shared_buf_mgr;

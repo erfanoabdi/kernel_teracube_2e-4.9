@@ -14,8 +14,8 @@
 
 #include <linux/types.h>
 #include <linux/printk.h>
-#include <linux/trusty/trusty.h>
-#include <linux/trusty/smcall.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
 #include "teei_bootprof.h"
 
 static int get_mem_attr(struct page *page, pgprot_t pgprot)

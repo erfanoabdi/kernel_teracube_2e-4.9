@@ -28,7 +28,7 @@
 #include <linux/semaphore.h>
 #include <linux/suspend.h>
 #include <linux/slab.h>
-#include <linux/teei/teei_ipc.h>
+#include <teei_ipc.h>
 #include <imsg_log.h>
 #include "fp_func.h"
 
@@ -46,7 +46,7 @@ static dev_t devno;
 static struct class *driver_class;
 struct fp_dev *fp_devp;
 
-unsigned long fp_trans_addr = 0;
+unsigned long fp_trans_addr;
 uint8_t *r_buf;
 
 tipc_k_handle fp_handle;
@@ -54,60 +54,52 @@ tipc_k_handle fp_handle;
 struct TEEC_UUID uuid_fp = { 0x7778c03f, 0xc30c, 0x4dd0,
 { 0xa3, 0x19, 0xea, 0x29, 0x64, 0x3d, 0x4d, 0x4b } };
 
-extern int tipc_k_connect(tipc_k_handle *h, const char *port);
-extern ssize_t tipc_k_write(tipc_k_handle h, void *buf, size_t len, unsigned int flags);
-extern ssize_t tipc_k_read(tipc_k_handle h, void *buf, size_t buf_len, unsigned int flags);
-extern int tipc_k_disconnect(tipc_k_handle h);
-
-int trusty_fingerprint_call(uint32_t cmd, void *in, uint32_t in_size, uint8_t *out,
-				uint32_t *out_size)
+int trusty_fingerprint_call(uint32_t cmd, void *in, uint32_t in_size,
+				uint8_t *out, uint32_t *out_size)
 {
 
 	size_t msg_size = 0;
 	ssize_t rc = 0;
-	uint32_t i;
 	uint32_t send_cmd = 0;
 	uint32_t recv_cmd = 0;
-	struct fingerprint_message* msg = NULL;
+	struct fingerprint_message *msg = NULL;
 	uint32_t bytes_remaining;
 	uint32_t bytes_sent = 0;
 	uint32_t max_msg_size = MAX_MESSAGE_SIZE;
 
 	if (fp_handle < 0) {
 		IMSG_ERROR("not connected\n");
-		return -EINVAL; 
+		return -EINVAL;
 	}
 
-
-    bytes_remaining = in_size;
+	bytes_remaining = in_size;
 
 	do {
 		msg_size = min(max_msg_size, bytes_remaining);
 		send_cmd = cmd | FP_RESP_BIT;
- 
+
 		if (msg_size == bytes_remaining) {
 			IMSG_DEBUG("fp ca send last package\n");
 			send_cmd = cmd | FP_STOP_BIT;
 		}
 
-		msg = (struct fingerprint_message*)kmalloc(msg_size + sizeof(struct fingerprint_message), GFP_KERNEL);
-		if (msg == NULL) {
-			IMSG_ERROR("Failed to kmalloc memory!\n");
-			return -ENOMEM;
-                }
-
+		msg = kmalloc(msg_size + sizeof(struct fingerprint_message),
+				GFP_KERNEL);
 		msg->cmd = send_cmd;
 		memcpy(msg->payload, in+bytes_sent, msg_size);
 
-		rc = tipc_k_write(fp_handle, msg, msg_size + sizeof(struct fingerprint_message), O_SYNC);
+		rc = tipc_k_write(fp_handle, msg,
+				msg_size + sizeof(struct fingerprint_message),
+				O_SYNC);
 		kfree(msg);
 		if (rc < 0) {
-			IMSG_ERROR("failed to send cmd (%d) to %s\n", cmd, FINGERPRINT_PORT);
+			IMSG_ERROR("failed to send cmd (%d) to %s\n",
+							cmd, FINGERPRINT_PORT);
 			return -1;
-		} else {
-			if(rc != msg_size + sizeof(struct fingerprint_message)) {
-				IMSG_ERROR("failed to send want (%lu) actual(%l)\n", msg_size, rc);
-			}
+		}
+		if (rc != (msg_size + sizeof(struct fingerprint_message))) {
+			IMSG_ERROR("failed to send want (%lu):(%lu)\n",
+								msg_size, rc);
 		}
 
 		bytes_remaining -= msg_size;
@@ -115,18 +107,21 @@ int trusty_fingerprint_call(uint32_t cmd, void *in, uint32_t in_size, uint8_t *o
 	} while (bytes_remaining);
 
 	*out_size = 0;
-    
+
 	while (true) {
 		memset(r_buf, 0, sizeof(r_buf));
 
-		rc = tipc_k_read(fp_handle, r_buf, FINGERPRINT_MAX_BUFFER_LENGTH, O_SYNC);
+		rc = tipc_k_read(fp_handle, r_buf,
+					FINGERPRINT_MAX_BUFFER_LENGTH, O_SYNC);
 		if (rc < 0) {
-			IMSG_ERROR("failed to retrieve response for cmd (%d) to %s,rc = %d\n", cmd, FINGERPRINT_PORT, rc);
+			IMSG_ERROR("failed to get response for cmd (%d) %s\n",
+							cmd, FINGERPRINT_PORT);
 			return -EINVAL;
 		}
 
 		if (rc == 0) {
-			IMSG_ERROR("there are no data read from ta, total len is %d", *out_size);
+			IMSG_ERROR("No data read from ta, total len is %d",
+							*out_size);
 			return -EINVAL;
 		}
 
@@ -135,7 +130,9 @@ int trusty_fingerprint_call(uint32_t cmd, void *in, uint32_t in_size, uint8_t *o
 			return -EINVAL;
 		}
 
-		recv_cmd = r_buf[3] << 24 | r_buf[2] << 16 | r_buf[1] << 8 | r_buf[0];
+		recv_cmd = r_buf[3] << 24 | r_buf[2] << 16 |
+					r_buf[1] << 8 | r_buf[0];
+
 		IMSG_DEBUG("cmd = %d, recv_cmd = %d\n", cmd, recv_cmd);
 
 		if ((cmd | FP_RESP_BIT) != (recv_cmd & ~(FP_STOP_BIT))) {
@@ -143,22 +140,22 @@ int trusty_fingerprint_call(uint32_t cmd, void *in, uint32_t in_size, uint8_t *o
 			return -EINVAL;
 		}
 
-		memcpy(out + *out_size, r_buf + sizeof(struct fingerprint_message),
-					(size_t)rc - sizeof(struct fingerprint_message));
+		memcpy(out + *out_size,
+			r_buf + sizeof(struct fingerprint_message),
+			(size_t)rc - sizeof(struct fingerprint_message));
 
-		*out_size += ((size_t)rc - sizeof(struct fingerprint_message));
+		*out_size += ((size_t)rc -
+					sizeof(struct fingerprint_message));
 
 		if (recv_cmd & FP_STOP_BIT) {
 			/*
-			IMSG_DEBUG("*out_size = %d\n", *out_size);
-
-			for (i = 0; i < *out_size; i++)
-				IMSG_DEBUG("out data[%d] = %x\n", i, *(out+i));
-			*/
+			 * IMSG_DEBUG("*out_size = %d\n", *out_size);
+			 * for (i = 0; i < *out_size; i++)
+			 *	IMSG_DEBUG("out data[%d] = %x\n", i, *(out+i));
+			 */
 			break;
 		}
 	}
-
 	return 0;
 }
 
@@ -169,7 +166,7 @@ int fp_open(struct inode *inode, struct file *filp)
 	IMSG_DEBUG("%s start\n", __func__);
 
 	ret = tipc_k_connect(&fp_handle, FINGERPRINT_PORT);
-	if(ret < 0){
+	if (ret < 0) {
 		IMSG_ERROR("service connect failed\n");
 		return -1;
 	}
@@ -187,7 +184,7 @@ int fp_release(struct inode *inode, struct file *filp)
 	IMSG_DEBUG("%s start\n", __func__);
 
 	ret = tipc_k_disconnect(fp_handle);
-	if(ret < 0){
+	if (ret < 0) {
 		IMSG_ERROR("service disconnect failed\n");
 		return -1;
 	}
@@ -218,37 +215,41 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		}
 
+
 		/* TODO compute args length */
 		/* [11-15] is the length of data */
 		args_len = *((unsigned int *)(args + 12));
 
 		if (args_len + 16 > FP_LIMIT_SIZE) {
-			IMSG_ERROR("args_len is invalid!.\n");
+			IMSG_ERROR("args_len is invalid!, args_len is %d\n",
+								args_len);
 			return -EFAULT;
 		}
 
-		if (copy_from_user((void *)fp_trans_addr, (void *)arg, 
-					args_len + 16)) { 
+		if (copy_from_user((void *)fp_trans_addr, (void *)arg,
+					args_len + 16)) {
 			IMSG_ERROR("copy from user failed.\n");
 			return -EFAULT;
 		}
 
 		/*
-		for(i = 0; i < args_len + 16; i++)
-			IMSG_DEBUG("fp_trans_addr[%d] = %x\n", i, *(unsigned char *)(fp_trans_addr+i));
-		*/
-
+		 *for (i = 0; i < args_len + 16; i++)
+		 *	IMSG_DEBUG("fp_send_addr[%d] = %x\n", i,
+		 *		*(unsigned char *)(fp_send_addr+i));
+		 */
 		lock_system_sleep();
-		ret = trusty_fingerprint_call(FP_REQ, (void *)fp_trans_addr, args_len + 16, 
-						(uint8_t *)fp_trans_addr, &fp_trans_len);
+		ret = trusty_fingerprint_call(FP_REQ, (void *)fp_trans_addr,
+						args_len + 16,
+						(uint8_t *)fp_trans_addr,
+						&fp_trans_len);
 		unlock_system_sleep();
 		if (ret < 0) {
-			IMSG_ERROR("transfer data to ta failed. ret = %d\n", ret);
+			IMSG_ERROR("transfer data failed. ret = %d\n", ret);
 			return -EFAULT;
 		}
 
-		if (copy_to_user((void *)arg, (void *)fp_trans_addr, 
-					args_len + 16)) {
+		if (copy_to_user((void *)arg, (void *)fp_trans_addr,
+						args_len + 16)) {
 			IMSG_ERROR("copy to user failed.\n");
 			return -EFAULT;
 		}
@@ -334,16 +335,15 @@ int fp_init(void)
 	}
 	memset(fp_devp, 0, sizeof(struct fp_dev));
 	fp_setup_cdev(fp_devp, 0);
-
 	fp_trans_addr = (unsigned long)kmalloc(FP_LIMIT_SIZE, GFP_KERNEL);
-	if(0 == fp_trans_addr){
+	if (fp_trans_addr == 0) {
 		IMSG_ERROR("fp_trans_addr malloc failed\n");
 		return -EFAULT;
 	}
 	memset((void *)fp_trans_addr, 0, FP_LIMIT_SIZE);
 
-	r_buf = (uint8_t *)kmalloc(FINGERPRINT_MAX_BUFFER_LENGTH, GFP_KERNEL);
-	if (NULL == r_buf) {
+	r_buf = kmalloc(FINGERPRINT_MAX_BUFFER_LENGTH, GFP_KERNEL);
+	if (r_buf == NULL) {
 		IMSG_ERROR("r_buf malloc failed\n");
 		return -EFAULT;
 	}

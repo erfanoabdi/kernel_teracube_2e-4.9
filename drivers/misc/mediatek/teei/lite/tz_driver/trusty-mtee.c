@@ -18,9 +18,9 @@
 #include <linux/of_platform.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/trusty/smcall.h>
 #include <linux/trusty/sm_err.h>
-#include <linux/trusty/trusty.h>
+#include <teei_trusty.h>
+#include <teei_smcall.h>
 #include "teei_bootprof.h"
 
 static struct platform_device *trusty_mtee_dev;

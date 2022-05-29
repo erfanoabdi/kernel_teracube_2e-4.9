@@ -15,11 +15,9 @@
 #include <linux/percpu.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/trusty/smcall.h>
-#include <linux/trusty/trusty.h>
-
+#include <teei_trusty.h>
 #include <asm/fiq_glue.h>
-
+#include <teei_smcall.h>
 #include "trusty-fiq.h"
 
 extern void trusty_fiq_glue_arm64(void);
@@ -33,8 +31,8 @@ void trusty_fiq_handler(struct pt_regs *regs, void *svc_sp)
 {
 	struct fiq_glue_handler *handler;
 
-	for (handler = ACCESS_ONCE(fiq_handlers); handler;
-	     handler = ACCESS_ONCE(handler->next)) {
+	for (handler = READ_ONCE(fiq_handlers); handler;
+		handler = READ_ONCE(handler->next)) {
 		/* Barrier paired with smp_wmb in fiq_glue_register_handler */
 		smp_read_barrier_depends();
 		handler->fiq(handler, regs, svc_sp);

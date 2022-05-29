@@ -15,11 +15,11 @@
 #include <linux/device.h>
 #include <linux/genalloc.h>
 #include <linux/slab.h>
-#include <linux/teei/teei_shm.h>
+#include <teei_shm.h>
 #include <imsg_log.h>
 
 static int pool_op_gen_alloc(struct teei_shm_pool_mgr *poolm,
-                             struct teei_shm *shm, size_t size)
+				struct teei_shm *shm, size_t size)
 {
 	unsigned long va;
 	struct gen_pool *genpool = poolm->private_data;
@@ -37,7 +37,7 @@ static int pool_op_gen_alloc(struct teei_shm_pool_mgr *poolm,
 }
 
 static void pool_op_gen_free(struct teei_shm_pool_mgr *poolm,
-                             struct teei_shm *shm)
+				struct teei_shm *shm)
 {
 	gen_pool_free(poolm->private_data, (unsigned long)shm->kaddr,
 			shm->size);

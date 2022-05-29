@@ -15,7 +15,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/ptrace.h>
 #include <linux/linkage.h>
-#include <linux/trusty/smcall.h>
+#include <teei_smcall.h>
 
 .macro	push	reg1,reg2,remregs:vararg
 	.ifnb \remregs
